@@ -1,0 +1,123 @@
+name: Build Orbi AI Windows Installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/build-windows.yml"
+      - "source_parts/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 240
+    env:
+      ORBI_CI_INSTALLER_ONLY: "1"
+      HF_HUB_DISABLE_PROGRESS_BARS: "1"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore Orbi dependency cache
+        id: restore-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/AppData/Local/OrbiAI/builder-cache
+          key: orbi-builder-cache-v2-${{ hashFiles('source_parts/**') }}
+          restore-keys: |
+            orbi-builder-cache-v2-
+
+      - name: Reconstruct Orbi source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $parts = Get-ChildItem -Path source_parts -Filter 'part*.b64' | Sort-Object Name
+          if ($parts.Count -ne 18) { throw "Expected 18 source parts, found $($parts.Count)." }
+          $sb = [System.Text.StringBuilder]::new()
+          foreach ($part in $parts) {
+            [void]$sb.Append((Get-Content -LiteralPath $part.FullName -Raw).Trim())
+          }
+          $bytes = [Convert]::FromBase64String($sb.ToString())
+          [IO.File]::WriteAllBytes((Join-Path $PWD 'orbi-source.tar.xz'), $bytes)
+          $hash = (Get-FileHash -Algorithm SHA256 .\orbi-source.tar.xz).Hash.ToLowerInvariant()
+          if ($hash -ne '1ba21d975a3ff40f9270d976feb1ba39916d54a7c6ffc27130c7df4b45d6b99a') {
+            throw "Source archive hash mismatch: $hash"
+          }
+          tar.exe -xf .\orbi-source.tar.xz
+          if (-not (Test-Path .\OrbiAI_LayaSpeed\scripts\prepare-offline.ps1)) {
+            throw 'Source extraction failed.'
+          }
+
+          # GitHub-hosted Windows runners are headless. Keep the real agent/model
+          # warmup smoke test, but do not fail only because WPF cannot attach to
+          # an interactive desktop session on CI.
+          $smokePath = '.\OrbiAI_LayaSpeed\scripts\smoke-test.ps1'
+          $smoke = Get-Content -LiteralPath $smokePath -Raw
+          $needle = "Write-Host '[smoke] testando se OrbiAI.exe permanece vivo no startup...'"
+          $pos = $smoke.IndexOf($needle)
+          if ($pos -gt 0) {
+            $smoke = $smoke.Substring(0, $pos) + "Write-Host '[smoke] WPF startup check skipped on headless GitHub runner.'`r`n"
+            [IO.File]::WriteAllText((Resolve-Path $smokePath), $smoke, [Text.UTF8Encoding]::new($false))
+          }
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+
+      - name: Build and validate offline installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\OrbiAI_LayaSpeed\scripts\prepare-offline.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Orbi builder failed with exit code $LASTEXITCODE" }
+
+      - name: Save dependency cache
+        if: always() && steps.restore-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/AppData/Local/OrbiAI/builder-cache
+          key: orbi-builder-cache-v2-${{ hashFiles('source_parts/**') }}
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrbiAI-build-log
+          path: OrbiAI_LayaSpeed/build.log
+          if-no-files-found: warn
+          retention-days: 2
+          compression-level: 0
+
+      - name: Validate installer file
+        if: success()
+        shell: pwsh
+        run: |
+          $exe = '.\OrbiAI_LayaSpeed\dist\Orbi-AI-Setup.exe'
+          if (-not (Test-Path $exe)) { throw 'Installer was not generated.' }
+          $f = Get-Item $exe
+          if ($f.Length -lt 1MB) { throw "Installer is suspiciously small: $($f.Length) bytes" }
+          Write-Host "INSTALLER_BYTES=$($f.Length)"
+          Write-Host "INSTALLER_SHA256=$((Get-FileHash $exe -Algorithm SHA256).Hash)"
+
+      - name: Upload Orbi installer
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrbiAI-Windows-Installer
+          path: OrbiAI_LayaSpeed/dist/Orbi-AI-Setup.exe
+          if-no-files-found: error
+          retention-days: 2
+          compression-level: 0
