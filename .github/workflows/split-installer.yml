@@ -1,0 +1,114 @@
+name: Split Orbi Installer for Delivery
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/split-installer.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  split:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Download validated installer from successful Windows build
+        uses: actions/download-artifact@v4
+        with:
+          name: OrbiAI-Windows-Installer
+          path: full
+          github-token: ${{ github.token }}
+          repository: jovem-sabio/orbi-ai-jonathan
+          run-id: 35794008089
+
+      - name: Verify and split installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f full/Orbi-AI-Setup.exe
+          mkdir -p parts
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json
+          src = Path("full/Orbi-AI-Setup.exe")
+          out = Path("parts")
+          chunk = 300 * 1024 * 1024
+          sha = hashlib.sha256()
+          size = 0
+          count = 0
+          with src.open("rb") as f:
+              while True:
+                  data = f.read(chunk)
+                  if not data:
+                      break
+                  sha.update(data)
+                  size += len(data)
+                  p = out / f"Orbi-AI-Setup.exe.part{count:02d}"
+                  p.write_bytes(data)
+                  print(p, len(data))
+                  count += 1
+          if count != 6:
+              raise SystemExit(f"Expected 6 parts, got {count}")
+          meta = {"filename": src.name, "size": size, "sha256": sha.hexdigest(), "parts": count, "chunk_bytes": chunk}
+          (out / "manifest.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+          print(json.dumps(meta))
+          PY
+
+      - name: Upload part 00
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrbiAI-part00
+          path: parts/Orbi-AI-Setup.exe.part00
+          compression-level: 0
+          retention-days: 2
+
+      - name: Upload part 01
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrbiAI-part01
+          path: parts/Orbi-AI-Setup.exe.part01
+          compression-level: 0
+          retention-days: 2
+
+      - name: Upload part 02
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrbiAI-part02
+          path: parts/Orbi-AI-Setup.exe.part02
+          compression-level: 0
+          retention-days: 2
+
+      - name: Upload part 03
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrbiAI-part03
+          path: parts/Orbi-AI-Setup.exe.part03
+          compression-level: 0
+          retention-days: 2
+
+      - name: Upload part 04
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrbiAI-part04
+          path: parts/Orbi-AI-Setup.exe.part04
+          compression-level: 0
+          retention-days: 2
+
+      - name: Upload part 05
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrbiAI-part05
+          path: parts/Orbi-AI-Setup.exe.part05
+          compression-level: 0
+          retention-days: 2
+
+      - name: Upload manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrbiAI-manifest
+          path: parts/manifest.json
+          retention-days: 2
