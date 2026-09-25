@@ -23,7 +23,7 @@ jobs:
           path: full
           github-token: ${{ github.token }}
           repository: jovem-sabio/orbi-ai-jonathan
-          run-id: 35794008089
+          run-id: 36120923028
 
       - name: Verify and split installer
         shell: bash
@@ -112,3 +112,5 @@ jobs:
           name: OrbiAI-manifest
           path: parts/manifest.json
           retention-days: 2
+
+# split-current-installer 2026-09-25
