@@ -121,3 +121,5 @@ jobs:
           if-no-files-found: error
           retention-days: 2
           compression-level: 0
+
+# rebuild-trigger 2026-09-25
