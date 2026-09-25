@@ -79,7 +79,14 @@ jobs:
 
       - name: Build and validate offline installer
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
+          $scriptPath = '.\\OrbiAI_LayaSpeed\\scripts\\prepare-offline.ps1'
+          $src = Get-Content -LiteralPath $scriptPath -Raw
+          $src = $src.Replace('@{"User-Agent"="OrbiAI-Builder"}', '@{"User-Agent"="OrbiAI-Builder";"Authorization"="Bearer $env:GITHUB_TOKEN"}')
+          $src = $src.Replace('@{"User-Agent"="OrbiAI-Builder";"Accept"="application/vnd.github+json"}', '@{"User-Agent"="OrbiAI-Builder";"Accept"="application/vnd.github+json";"Authorization"="Bearer $env:GITHUB_TOKEN"}')
+          [IO.File]::WriteAllText((Resolve-Path $scriptPath), $src, [Text.UTF8Encoding]::new($false))
           $ErrorActionPreference = 'Stop'
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\OrbiAI_LayaSpeed\scripts\prepare-offline.ps1
           if ($LASTEXITCODE -ne 0) { throw "Orbi builder failed with exit code $LASTEXITCODE" }
@@ -123,3 +130,5 @@ jobs:
           compression-level: 0
 
 # rebuild-trigger 2026-09-25
+
+# authenticated-github-api-fix 2026-09-25
